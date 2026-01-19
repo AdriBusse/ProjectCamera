@@ -11,6 +11,7 @@ import Animated, {
 import LinearGradient from 'react-native-linear-gradient';
 import { useTheme } from '../context/ThemeContext';
 import Orientation from 'react-native-orientation-locker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const MIN_SIZE = 100;
 
@@ -22,6 +23,7 @@ interface Props {
 
 export const CropOverlay = ({ onCropRegionChange, onTap, isActive }: Props) => {
     const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = useWindowDimensions();
+    const insets = useSafeAreaInsets();
     const { theme } = useTheme();
 
     const [isSquare, setIsSquare] = useState(false);
@@ -193,7 +195,11 @@ export const CropOverlay = ({ onCropRegionChange, onTap, isActive }: Props) => {
 
                 {/* Aspect Ratio Toggle Button */}
                 {showToggle && (
-                    <Animated.View style={[styles.buttonContainer, animatedButtonStyle]}>
+                    <Animated.View style={[
+                        styles.buttonContainer,
+                        animatedButtonStyle,
+                        { top: insets.top + 10 }
+                    ]}>
                         <TouchableOpacity
                             onPress={toggleAspectRatio}
                             activeOpacity={0.6}
@@ -203,7 +209,7 @@ export const CropOverlay = ({ onCropRegionChange, onTap, isActive }: Props) => {
                             ]}
                         >
                             <Text style={[styles.buttonText, { color: theme.textColor }]}>
-                                {isSquare ? '16:9' : '1:1'}
+                                {isSquare ? '1:1' : '16:9'}
                             </Text>
                         </TouchableOpacity>
                     </Animated.View>
@@ -228,15 +234,15 @@ const styles = StyleSheet.create({
         zIndex: 20,
     },
     button: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
         borderRadius: 4, // Slightly rounded for "HUD" button
         borderWidth: 1,
         backgroundColor: 'transparent', // Transparent as requested
     },
     buttonText: {
         fontWeight: '900',
-        fontSize: 14,
+        fontSize: 12,
         letterSpacing: 1,
     },
 });

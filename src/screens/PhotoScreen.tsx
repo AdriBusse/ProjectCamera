@@ -1,21 +1,26 @@
-import React, { useState } from 'react';
-import { View, Image, StyleSheet, TouchableOpacity, Text, Dimensions, Alert, Linking, Platform } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { View, Image, StyleSheet, TouchableOpacity, Dimensions, Alert, Linking, Platform, FlatList } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RNFS from 'react-native-fs';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
-const { width, height } = Dimensions.get('window');
-
-import { PhotoMenu } from '../components/PhotoMenu';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export function PhotoScreen({ route, navigation }: any) {
-    const { path } = route.params;
+    const { photos, initialIndex } = route.params;
     const insets = useSafeAreaInsets();
-    const [imagePath, setImagePath] = useState(path);
-    const [menuVisible, setMenuVisible] = useState(false);
+
+    // We maintain local state of photos to allow deletion
+    const [currentPhotos, setCurrentPhotos] = useState<string[]>(photos || []);
+    // Track current index
+    const [currentIndex, setCurrentIndex] = useState(initialIndex || 0);
 
     const onOpenGallery = async () => {
+        if (currentPhotos.length === 0) return;
+        const currentPath = currentPhotos[currentIndex];
+
         try {
-            const url = `file://${imagePath}`;
+            const url = `file://${currentPath}`;
             const supported = await Linking.canOpenURL(url);
 
             if (supported || Platform.OS === 'android') {
@@ -30,38 +35,107 @@ export function PhotoScreen({ route, navigation }: any) {
     };
 
     const onDelete = async () => {
-        try {
-            await RNFS.unlink(imagePath);
-            navigation.goBack();
-        } catch (e) {
-            Alert.alert('Error', 'Failed to delete file.');
-        }
+        if (currentPhotos.length === 0) return;
+        const currentPath = currentPhotos[currentIndex];
+
+        Alert.alert(
+            'Delete Photo',
+            'Are you sure you want to delete this photo?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            await RNFS.unlink(currentPath);
+
+                            // Update local list
+                            const newPhotos = [...currentPhotos];
+                            newPhotos.splice(currentIndex, 1);
+
+                            if (newPhotos.length === 0) {
+                                navigation.goBack();
+                                return;
+                            }
+
+                            setCurrentPhotos(newPhotos);
+                            // Adjust index if we deleted the last item
+                            if (currentIndex >= newPhotos.length) {
+                                setCurrentIndex(newPhotos.length - 1);
+                            }
+                        } catch (e) {
+                            Alert.alert('Error', 'Failed to delete file.');
+                        }
+                    }
+                }
+            ]
+        );
     };
+
+    const renderItem = ({ item }: { item: string }) => {
+        return (
+            <View style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT, justifyContent: 'center', alignItems: 'center' }}>
+                <Image
+                    source={{ uri: `file://${item}` }}
+                    style={styles.image}
+                    resizeMode="contain"
+                />
+            </View>
+        );
+    };
+
+    const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
+        if (viewableItems.length > 0) {
+            setCurrentIndex(viewableItems[0].index ?? 0);
+        }
+    }).current;
+
+    const viewabilityConfig = useRef({
+        itemVisiblePercentThreshold: 50
+    }).current;
 
     return (
         <View style={styles.container}>
-            <Image
-                source={{ uri: `file://${imagePath}` }}
-                style={styles.image}
-                resizeMode="contain"
+            <FlatList
+                data={currentPhotos}
+                renderItem={renderItem}
+                keyExtractor={item => item}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                initialScrollIndex={initialIndex}
+                getItemLayout={(data, index) => (
+                    { length: SCREEN_WIDTH, offset: SCREEN_WIDTH * index, index }
+                )}
+                onViewableItemsChanged={onViewableItemsChanged}
+                viewabilityConfig={viewabilityConfig}
             />
 
-            <View style={[styles.header, { paddingTop: insets.top }]}>
+            <View style={[styles.header, { paddingTop: insets.top, height: insets.top + 60 }]}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.button}>
-                    <Text style={styles.buttonText}>Back</Text>
+                    <Icon name="arrow-left" size={28} color="white" />
                 </TouchableOpacity>
 
-                <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.button}>
-                    <Text style={styles.menuIcon}>⋮</Text>
-                </TouchableOpacity>
+                <View style={styles.rightActions}>
+                    <TouchableOpacity
+                        onPress={() => {
+                            if (currentPhotos[currentIndex]) {
+                                navigation.navigate('ImageEdit', { imagePath: currentPhotos[currentIndex] });
+                            }
+                        }}
+                        style={styles.button}
+                    >
+                        <Icon name="pencil" size={28} color="white" />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={onOpenGallery} style={styles.button}>
+                        <Icon name="image-outline" size={28} color="white" />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={onDelete} style={styles.button}>
+                        <Icon name="trash-can-outline" size={28} color="#ff4444" />
+                    </TouchableOpacity>
+                </View>
             </View>
-
-            <PhotoMenu
-                visible={menuVisible}
-                onClose={() => setMenuVisible(false)}
-                onOpenGallery={onOpenGallery}
-                onDelete={onDelete}
-            />
         </View>
     );
 }
@@ -72,8 +146,8 @@ const styles = StyleSheet.create({
         backgroundColor: 'black',
     },
     image: {
-        width: width,
-        height: height,
+        width: SCREEN_WIDTH,
+        height: SCREEN_HEIGHT,
     },
     header: {
         position: 'absolute',
@@ -82,22 +156,15 @@ const styles = StyleSheet.create({
         right: 0,
         flexDirection: 'row',
         justifyContent: 'space-between',
+        alignItems: 'center',
         paddingHorizontal: 20,
-        paddingBottom: 10,
-        backgroundColor: 'rgba(0,0,0,0.3)', // Semi-transparent header
+        backgroundColor: 'rgba(0,0,0,0.4)',
     },
     button: {
-        padding: 10,
+        padding: 5,
     },
-    buttonText: {
-        color: 'white',
-        fontSize: 16,
-        fontWeight: '600',
-    },
-    menuIcon: {
-        color: 'white',
-        fontSize: 24,
-        fontWeight: 'bold',
-        lineHeight: 24,
+    rightActions: {
+        flexDirection: 'row',
+        gap: 15
     }
 });

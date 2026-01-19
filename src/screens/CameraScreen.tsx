@@ -1,5 +1,5 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Alert, Platform, PermissionsAndroid, AppState, Dimensions } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Alert, Platform, PermissionsAndroid, AppState, Dimensions, DeviceEventEmitter } from 'react-native';
 import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
@@ -18,8 +18,9 @@ import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-na
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-// Inner component to access ThemeContext
-const CameraContent = ({ navigation }: any) => {
+// Main component
+export const CameraScreen = ({ navigation }: any) => {
+    // Verified: Only one CameraScreen declaration exists in this file.
     const { hasPermission, requestPermission } = useCameraPermission();
     const device = useCameraDevice('back');
     const isFocused = useIsFocused();
@@ -33,6 +34,7 @@ const CameraContent = ({ navigation }: any) => {
     const [showFocusIndicator, setShowFocusIndicator] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [isForeground, setIsForeground] = useState(true);
+    const [cameraMountKey, setCameraMountKey] = useState(0);
 
     const uiRotation = useSharedValue(0);
 
@@ -69,7 +71,13 @@ const CameraContent = ({ navigation }: any) => {
     // AppState Logic
     useEffect(() => {
         const subscription = AppState.addEventListener('change', (nextAppState) => {
-            setIsForeground(nextAppState === 'active');
+            const isNowForeground = nextAppState === 'active';
+            setIsForeground(isNowForeground);
+
+            if (isNowForeground) {
+                // Force remount to clear "camera is closed" errors
+                setCameraMountKey(prev => prev + 1);
+            }
         });
 
         return () => {
@@ -135,71 +143,83 @@ const CameraContent = ({ navigation }: any) => {
                 flash: 'off'
             });
 
-            await RNFS.mkdir(APP_FOLDER_PATH);
-            let finalPath = photo.path;
+            // Unblock UI immediately
+            setIsCapturing(false);
 
-            if (cropRegion) {
-                const isScreenPortrait = SCREEN_HEIGHT > SCREEN_WIDTH;
-                const isPhotoLandscape = photo.width > photo.height;
-                let imageWidth = photo.width;
-                let imageHeight = photo.height;
-
-                if (isScreenPortrait && isPhotoLandscape) {
-                    imageWidth = photo.height;
-                    imageHeight = photo.width;
-                }
-
-                const scale = Math.max(SCREEN_WIDTH / imageWidth, SCREEN_HEIGHT / imageHeight);
-                const displayedWidth = imageWidth * scale;
-                const displayedHeight = imageHeight * scale;
-                const offsetX = (displayedWidth - SCREEN_WIDTH) / 2;
-                const offsetY = (displayedHeight - SCREEN_HEIGHT) / 2;
-
-                let cropX = (cropRegion.x + offsetX) / scale;
-                let cropY = (cropRegion.y + offsetY) / scale;
-                let cropW = cropRegion.width / scale;
-                let cropH = cropRegion.height / scale;
-
-                cropX = Math.max(0, cropX);
-                cropY = Math.max(0, cropY);
-                if (cropX + cropW > imageWidth) cropW = imageWidth - cropX;
-                if (cropY + cropH > imageHeight) cropH = imageHeight - cropY;
-
-                const cropData = {
-                    offset: { x: Math.round(cropX), y: Math.round(cropY) },
-                    size: { width: Math.round(cropW), height: Math.round(cropH) },
-                };
-
-                let inputPath = photo.path;
-                if (Platform.OS === 'android' && !inputPath.startsWith('file://')) {
-                    inputPath = `file://${inputPath}`;
-                }
-
+            // Process in background
+            (async () => {
                 try {
-                    const croppedResult = await ImageEditor.cropImage(inputPath, cropData);
-                    finalPath = croppedResult.uri;
-                } catch (cropError) {
-                    console.error('Crop failed:', cropError);
+                    await RNFS.mkdir(APP_FOLDER_PATH);
+                    let finalPath = photo.path;
+
+                    if (cropRegion) {
+                        const isScreenPortrait = SCREEN_HEIGHT > SCREEN_WIDTH;
+                        const isPhotoLandscape = photo.width > photo.height;
+                        let imageWidth = photo.width;
+                        let imageHeight = photo.height;
+
+                        if (isScreenPortrait && isPhotoLandscape) {
+                            imageWidth = photo.height;
+                            imageHeight = photo.width;
+                        }
+
+                        const scale = Math.max(SCREEN_WIDTH / imageWidth, SCREEN_HEIGHT / imageHeight);
+                        const displayedWidth = imageWidth * scale;
+                        const displayedHeight = imageHeight * scale;
+                        const offsetX = (displayedWidth - SCREEN_WIDTH) / 2;
+                        const offsetY = (displayedHeight - SCREEN_HEIGHT) / 2;
+
+                        let cropX = (cropRegion.x + offsetX) / scale;
+                        let cropY = (cropRegion.y + offsetY) / scale;
+                        let cropW = cropRegion.width / scale;
+                        let cropH = cropRegion.height / scale;
+
+                        cropX = Math.max(0, cropX);
+                        cropY = Math.max(0, cropY);
+                        if (cropX + cropW > imageWidth) cropW = imageWidth - cropX;
+                        if (cropY + cropH > imageHeight) cropH = imageHeight - cropY;
+
+                        const cropData = {
+                            offset: { x: Math.round(cropX), y: Math.round(cropY) },
+                            size: { width: Math.round(cropW), height: Math.round(cropH) },
+                        };
+
+                        let inputPath = photo.path;
+                        if (Platform.OS === 'android' && !inputPath.startsWith('file://')) {
+                            inputPath = `file://${inputPath}`;
+                        }
+
+                        try {
+                            const croppedResult = await ImageEditor.cropImage(inputPath, cropData);
+                            finalPath = croppedResult.uri;
+                        } catch (cropError) {
+                            console.error('Crop failed:', cropError);
+                        }
+                    }
+
+                    const filename = `photo_${Date.now()}.jpg`;
+                    const path = `file://${APP_FOLDER_PATH}/${filename}`;
+
+                    await RNFS.moveFile(finalPath, path);
+
+                    if (Platform.OS === 'android' && !(await hasAndroidPermission())) {
+                        console.warn('Permission denied for gallery save');
+                    } else {
+                        try {
+                            await CameraRoll.saveAsset(path, { type: 'photo' });
+                        } catch (cameraRollErr) {
+                            console.warn('Gallery save error:', cameraRollErr);
+                        }
+                    }
+                } catch (processingError) {
+                    console.error('Background processing failed', processingError);
+                } finally {
+                    DeviceEventEmitter.emit('REFRESH_GALLERY');
                 }
-            }
+            })();
 
-            const filename = `photo_${Date.now()}.jpg`;
-            const path = `file://${APP_FOLDER_PATH}/${filename}`;
-
-            await RNFS.moveFile(finalPath, path);
-
-            if (Platform.OS === 'android' && !(await hasAndroidPermission())) {
-                Alert.alert('Permission denied');
-            } else {
-                try {
-                    await CameraRoll.saveAsset(path, { type: 'photo' });
-                } catch (cameraRollErr) {
-                    Alert.alert('Gallery Error', 'Check permissions.');
-                }
-            }
         } catch (e) {
             console.error('Failed to take photo!', e);
-        } finally {
             setIsCapturing(false);
         }
     }, [camera, cropRegion, isCapturing]);
@@ -218,11 +238,13 @@ const CameraContent = ({ navigation }: any) => {
         <View style={styles.container}>
             <Camera
                 ref={camera}
+                key={cameraMountKey}
                 style={StyleSheet.absoluteFill}
                 device={device}
                 isActive={isFocused && isForeground}
                 photo={true}
                 resizeMode="cover"
+                onError={(e) => console.error('Camera Error:', e)}
             />
 
             {focusPoint && (
@@ -250,8 +272,9 @@ const CameraContent = ({ navigation }: any) => {
             <TouchableOpacity
                 style={[styles.settingsButton, { top: insets.top + 10 }]}
                 onPress={() => setShowSettings(true)}
+                disabled={isCapturing}
             >
-                <Animated.View style={animatedIconStyle}>
+                <Animated.View style={[animatedIconStyle, { opacity: isCapturing ? 0.5 : 1 }]}>
                     <Icon name="cog" size={24} color={theme.borderColor} />
                 </Animated.View>
             </TouchableOpacity>
@@ -262,8 +285,9 @@ const CameraContent = ({ navigation }: any) => {
                 <TouchableOpacity
                     style={styles.galleryButton}
                     onPress={() => navigation.navigate('Gallery')}
+                    disabled={isCapturing}
                 >
-                    <Animated.View style={animatedIconStyle}>
+                    <Animated.View style={[animatedIconStyle, { opacity: isCapturing ? 0.5 : 1 }]}>
                         <LinearGradient
                             colors={theme.secondaryGradient}
                             style={[styles.galleryIcon, { borderColor: theme.borderColor }]}
@@ -279,13 +303,7 @@ const CameraContent = ({ navigation }: any) => {
     );
 };
 
-export function CameraScreen(props: any) {
-    return (
-        <ThemeProvider>
-            <CameraContent {...props} />
-        </ThemeProvider>
-    );
-}
+
 
 const styles = StyleSheet.create({
     container: {

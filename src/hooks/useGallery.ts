@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { DeviceEventEmitter } from 'react-native';
 import RNFS from 'react-native-fs';
 import { APP_FOLDER_PATH } from '../utils/constants';
 
@@ -38,6 +39,8 @@ export const useGallery = () => {
 
     useEffect(() => {
         loadPhotos();
+        const subscription = DeviceEventEmitter.addListener('REFRESH_GALLERY', loadPhotos);
+        return () => subscription.remove();
     }, [loadPhotos]);
 
     return { photos, loadPhotos, deletePhoto };
