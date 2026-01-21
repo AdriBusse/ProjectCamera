@@ -16,10 +16,10 @@ export const useGallery = () => {
             }
 
             const files = await RNFS.readDir(APP_FOLDER_PATH);
-            // Filter for images and sort by date (newest first)
+            // Filter for images and sort by name (descending) to group edits with originals if named appropriately
             const imageFiles = files
                 .filter(f => f.isFile() && /\.(jpg|jpeg|png)$/i.test(f.name))
-                .sort((a, b) => (b.mtime?.getTime() ?? 0) - (a.mtime?.getTime() ?? 0))
+                .sort((a, b) => b.name.localeCompare(a.name))
                 .map(f => f.path);
 
             setPhotos(imageFiles);

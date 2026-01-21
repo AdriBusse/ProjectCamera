@@ -42,7 +42,24 @@ export function ImageEditScreen({ route, navigation }: any) {
             const snapshot = await canvasRef.current.makeImageSnapshot();
             if (snapshot) {
                 const base64 = snapshot.encodeToBase64(100); // JPEG 100
-                const filename = `edited_${Date.now()}.jpg`;
+                // Generate filename based on original to keep them together in sort order
+                let originalName = 'photo';
+                if (imagePath) {
+                    const nameParts = imagePath.split('/').pop()?.split('.');
+                    if (nameParts && nameParts.length > 0) {
+                        originalName = nameParts.slice(0, -1).join('.');
+                    }
+                }
+
+                // If the original name already contains "_edited", we append to it?
+                // Actually, just appending another _edited_TIMESTAMP is fine for history, 
+                // or we could replace the suffix if we don't want deep recursion of names, 
+                // but user asked for "edited several times".
+                // Let's just append for now to be safe and simple: 
+                // photo_123.jpg -> photo_123_edited_{time}.jpg
+                // Sort order descending: photo_123_edited... comes BEFORE photo_123.jpg because '_' > '.'
+
+                const filename = `${originalName}_edited_${Date.now()}.jpg`;
                 const path = `file://${APP_FOLDER_PATH}/${filename}`;
 
                 await RNFS.writeFile(path, base64, 'base64');

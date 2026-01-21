@@ -12,6 +12,8 @@ import { CropOverlay } from '../components/CropOverlay';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { ThemeProvider, useTheme } from '../context/ThemeContext';
 import { SettingsDropdown } from '../components/SettingsDropdown';
+import { FlashMenu } from '../components/FlashMenu';
+import { CameraTopBar } from '../components/CameraTopBar';
 import LinearGradient from 'react-native-linear-gradient';
 import Orientation from 'react-native-orientation-locker';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
@@ -20,9 +22,31 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // Main component
 export const CameraScreen = ({ navigation }: any) => {
-    // Verified: Only one CameraScreen declaration exists in this file.
+    // Select back camera with explicit Flash support preference
+    // Note: If no device matches, this might return undefined, so we still handle that case.
+    const device = useCameraDevice('back', {
+        hasFlash: true
+    });
+
     const { hasPermission, requestPermission } = useCameraPermission();
-    const device = useCameraDevice('back');
+
+    // Safety check for flash support
+    const supportsFlash = device?.hasFlash ?? false;
+
+    // Debugging: Log device info
+    useEffect(() => {
+        if (device) {
+            console.log('Active Camera Device:', {
+                id: device.id,
+                name: device.name,
+                hasFlash: device.hasFlash,
+                position: device.position
+            });
+        } else {
+            console.log('No Camera Device Selected');
+        }
+    }, [device]);
+
     const isFocused = useIsFocused();
     const insets = useSafeAreaInsets();
     const camera = useRef<Camera>(null);
@@ -35,6 +59,12 @@ export const CameraScreen = ({ navigation }: any) => {
     const [showSettings, setShowSettings] = useState(false);
     const [isForeground, setIsForeground] = useState(true);
     const [cameraMountKey, setCameraMountKey] = useState(0);
+
+    // Controls
+    const [flashMode, setFlashMode] = useState<'off' | 'on' | 'auto' | 'torch'>('off');
+    const [exposure, setExposure] = useState(0);
+    const [showFlashMenu, setShowFlashMenu] = useState(false);
+    const [isSquare, setIsSquare] = useState(false);
 
     const uiRotation = useSharedValue(0);
 
@@ -110,9 +140,10 @@ export const CameraScreen = ({ navigation }: any) => {
         setFocusPoint(point);
         setShowFocusIndicator(true);
 
+        // Keep visible longer for exposure adjustment or rely on interaction to keep it alive
         focusTimeout.current = setTimeout(() => {
             setShowFocusIndicator(false);
-        }, 1000);
+        }, 3000); // 3 seconds timeout
 
         try {
             await camera.current.focus(point);
@@ -124,6 +155,8 @@ export const CameraScreen = ({ navigation }: any) => {
     }, [camera, insets]);
 
     async function hasAndroidPermission() {
+        if (Platform.OS !== 'android') return true;
+
         const platformVersion = Number(Platform.Version);
         if (platformVersion >= 29) {
             return true;
@@ -139,8 +172,17 @@ export const CameraScreen = ({ navigation }: any) => {
         if (!camera.current || isCapturing) return;
         setIsCapturing(true);
         try {
+            // Determine actual flash setting for capture
+            let flashSetting: 'off' | 'on' | 'auto' = 'off';
+
+            // Only use flash settings if supported
+            if (supportsFlash) {
+                if (flashMode === 'on') flashSetting = 'on';
+                if (flashMode === 'auto') flashSetting = 'auto';
+            }
+
             const photo = await camera.current.takePhoto({
-                flash: 'off'
+                flash: flashSetting
             });
 
             // Unblock UI immediately
@@ -222,13 +264,35 @@ export const CameraScreen = ({ navigation }: any) => {
             console.error('Failed to take photo!', e);
             setIsCapturing(false);
         }
-    }, [camera, cropRegion, isCapturing]);
+    }, [camera, cropRegion, isCapturing, flashMode, supportsFlash]);
 
     const animatedIconStyle = useAnimatedStyle(() => {
         return {
             transform: [{ rotate: `${uiRotation.value}deg` }],
         };
     });
+
+    const getFlashIcon = () => {
+        switch (flashMode) {
+            case 'on': return 'flash';
+            case 'auto': return 'flash-auto';
+            case 'torch': return 'flashlight';
+            default: return 'flash-off';
+        }
+    };
+
+    const onExposureChange = (value: number) => {
+        // Reset timeout on interaction
+        if (focusTimeout.current) {
+            clearTimeout(focusTimeout.current);
+        }
+        // Keep visible much longer (5s) while adjusting or after
+        focusTimeout.current = setTimeout(() => {
+            setShowFocusIndicator(false);
+        }, 5000);
+
+        setExposure(value);
+    };
 
     if (!device || !hasPermission) {
         return <View style={styles.container}><Text>No Camera Device or Permission</Text></View>;
@@ -243,6 +307,8 @@ export const CameraScreen = ({ navigation }: any) => {
                 device={device}
                 isActive={isFocused && isForeground}
                 photo={true}
+                exposure={exposure}
+                torch={flashMode === 'torch' ? 'on' : 'off'}
                 resizeMode="cover"
                 onError={(e) => console.error('Camera Error:', e)}
             />
@@ -250,34 +316,74 @@ export const CameraScreen = ({ navigation }: any) => {
             {focusPoint && (
                 <View
                     style={[
-                        styles.focusIndicator,
+                        styles.focusWrapper,
                         {
-                            left: focusPoint.x - 25,
-                            top: focusPoint.y - 25,
+                            left: focusPoint.x - 75,
+                            top: focusPoint.y - 75,
                             opacity: showFocusIndicator ? 1 : 0,
-                            transform: [{ scale: showFocusIndicator ? 1 : 1.25 }],
-                            borderColor: theme.borderColor,
-                            shadowColor: theme.glowColor,
+                            pointerEvents: showFocusIndicator ? 'auto' : 'none',
                         }
                     ]}
-                />
+                >
+                    <View
+                        style={[
+                            styles.focusIndicator,
+                            {
+                                borderColor: theme.borderColor,
+                                shadowColor: theme.glowColor,
+                            }
+                        ]}
+                    />
+
+                    <View style={styles.exposureContainer}>
+                        <Icon name="white-balance-sunny" size={20} color={theme.borderColor} style={{ marginRight: 10 }} />
+                        <View
+                            style={styles.sliderTouchArea}
+                            onStartShouldSetResponder={() => true}
+                            onMoveShouldSetResponder={() => true}
+                            onResponderMove={(e) => {
+                                e.stopPropagation();
+                                const newX = e.nativeEvent.locationX;
+                                const sliderWidth = 100;
+                                const percent = Math.max(0, Math.min(1, newX / sliderWidth));
+                                const range = 4; // -2 to 2
+                                const newValue = (percent * range) - 2;
+                                onExposureChange(newValue);
+                            }}
+                        >
+                            <View style={styles.sliderTrack}>
+                                <View style={[styles.sliderFill, { width: `${((exposure + 2) / 4) * 100}%`, backgroundColor: theme.primaryColor }]} />
+                            </View>
+                        </View>
+                    </View>
+                </View>
             )}
 
             <CropOverlay
                 onCropRegionChange={setCropRegion}
                 onTap={onTapToFocus}
                 isActive={true}
+                isSquare={isSquare}
             />
 
-            <TouchableOpacity
-                style={[styles.settingsButton, { top: insets.top + 10 }]}
-                onPress={() => setShowSettings(true)}
-                disabled={isCapturing}
-            >
-                <Animated.View style={[animatedIconStyle, { opacity: isCapturing ? 0.5 : 1 }]}>
-                    <Icon name="cog" size={24} color={theme.borderColor} />
-                </Animated.View>
-            </TouchableOpacity>
+            {/* Top Bar with Flash, Ratio, and Settings */}
+            <CameraTopBar
+                flashMode={flashMode}
+                onFlashPress={() => setShowFlashMenu(true)}
+                isSquare={isSquare}
+                onToggleRatio={() => setIsSquare(!isSquare)}
+                onSettingsPress={() => setShowSettings(true)}
+                uiRotation={uiRotation}
+                supportsFlash={supportsFlash}
+                isCapturing={isCapturing}
+            />
+
+            <FlashMenu
+                visible={showFlashMenu}
+                currentMode={flashMode}
+                onSelect={setFlashMode}
+                onClose={() => setShowFlashMenu(false)}
+            />
 
             <SettingsDropdown visible={showSettings} onClose={() => setShowSettings(false)} />
 
@@ -302,8 +408,6 @@ export const CameraScreen = ({ navigation }: any) => {
         </View>
     );
 };
-
-
 
 const styles = StyleSheet.create({
     container: {
@@ -334,21 +438,59 @@ const styles = StyleSheet.create({
     spacer: {
         width: 50,
     },
-    focusIndicator: {
+    focusWrapper: {
         position: 'absolute',
-        width: 50,
-        height: 50,
-        borderRadius: 25,
+        width: 150,
+        height: 150,
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 50,
+    },
+    focusIndicator: {
+        width: 70,
+        height: 70,
+        borderRadius: 35,
         borderWidth: 2,
         backgroundColor: 'transparent',
-        zIndex: 10,
-        shadowOpacity: 1,
-        shadowRadius: 10,
-        elevation: 10,
+        marginBottom: 15,
+    },
+    exposureContainer: {
+        width: '100%',
+        height: 40,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 5,
+    },
+    sliderTouchArea: {
+        width: 120,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'flex-start',
+        backgroundColor: 'transparent',
+    },
+    sliderTrack: {
+        width: 100,
+        height: 4,
+        backgroundColor: 'rgba(255,255,255,0.3)',
+        borderRadius: 2,
+        overflow: 'hidden',
+        marginLeft: 10,
+    },
+    sliderFill: {
+        height: '100%',
     },
     settingsButton: {
         position: 'absolute',
         right: 20,
+        zIndex: 20,
+        padding: 10,
+        borderRadius: 20,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+    },
+    flashButton: {
+        position: 'absolute',
+        left: 20,
         zIndex: 20,
         padding: 10,
         borderRadius: 20,
