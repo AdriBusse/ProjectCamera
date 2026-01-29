@@ -10,12 +10,29 @@ const COLUMN_COUNT = 3;
 const IMAGE_SIZE = width / COLUMN_COUNT;
 
 export function GalleryScreen({ navigation }: any) {
-    const { photos, deletePhoto, loadPhotos } = useGallery();
+    const { photos, deletePhoto, loadPhotos, getPhotoGroups } = useGallery();
     const insets = useSafeAreaInsets();
     const { theme } = useTheme();
 
     const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
     const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const [showGrouped, setShowGrouped] = useState(true); // Default to grouped view
+
+    // Prepare data directly in render or useMemo.
+    // getPhotoGroups returns { id, preview, allVersions, isGrouped }
+    const galleryData = React.useMemo(() => {
+        if (showGrouped) {
+            return getPhotoGroups(photos); // Returns array of objects
+        } else {
+            // Map plain photos to consistent structure
+            return photos.map(path => ({
+                id: path,
+                preview: path,
+                allVersions: [path],
+                isGrouped: false
+            }));
+        }
+    }, [photos, showGrouped, getPhotoGroups]);
 
     // Reload when screen comes into focus
     React.useEffect(() => {
@@ -46,11 +63,18 @@ export function GalleryScreen({ navigation }: any) {
         setSelectedPhotos(newSelected);
     };
 
-    const handlePress = (path: string, index: number) => {
+    const handlePress = (item: any, index: number) => {
         if (isSelectionMode) {
-            toggleSelection(path);
+            toggleSelection(item.preview);
         } else {
-            navigation.navigate('Photo', { photos, initialIndex: index });
+            // If grouped, pass only the relevant group versions or the flat list?
+            // User requirement: "in the image i can press again on a button to see all versions"
+            // So default behavior is just showing the clicked image.
+            navigation.navigate('Photo', {
+                photos: galleryData.map(d => d.preview), // Context is current view
+                initialIndex: index,
+                groupVersions: item.allVersions // Passthrough group versions for this specific item
+            });
         }
     };
 
@@ -80,18 +104,18 @@ export function GalleryScreen({ navigation }: any) {
         setSelectedPhotos(new Set());
     };
 
-    const renderItem = useCallback(({ item, index }: { item: string, index: number }) => {
-        const isSelected = selectedPhotos.has(item);
+    const renderItem = useCallback(({ item, index }: { item: any, index: number }) => {
+        const isSelected = selectedPhotos.has(item.preview);
 
         return (
             <TouchableOpacity
                 style={{ width: IMAGE_SIZE, height: IMAGE_SIZE }}
-                onLongPress={() => handleLongPress(item)}
+                onLongPress={() => handleLongPress(item.preview)}
                 onPress={() => handlePress(item, index)}
                 activeOpacity={0.7}
             >
                 <Image
-                    source={{ uri: `file://${item}` }}
+                    source={{ uri: `file://${item.preview}` }}
                     style={[
                         styles.thumbnail,
                         { width: IMAGE_SIZE, height: IMAGE_SIZE },
@@ -99,6 +123,13 @@ export function GalleryScreen({ navigation }: any) {
                     ]}
                     resizeMode="cover"
                 />
+
+                {/* Group Indicator (Small icon top right) */}
+                {item.isGrouped && !isSelectionMode && (
+                    <View style={styles.groupIndicator}>
+                        <Icon name="layers-outline" size={16} color="white" />
+                    </View>
+                )}
 
                 {isSelectionMode && (
                     <View style={styles.selectionIndicator}>
@@ -111,7 +142,7 @@ export function GalleryScreen({ navigation }: any) {
                 )}
             </TouchableOpacity>
         );
-    }, [selectedPhotos, isSelectionMode, theme]);
+    }, [selectedPhotos, isSelectionMode, theme, showGrouped]);
 
     return (
         <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -120,9 +151,28 @@ export function GalleryScreen({ navigation }: any) {
                     <Icon name="arrow-left" size={28} color="white" />
                 </TouchableOpacity>
 
-                <Text style={styles.title}>
-                    {isSelectionMode ? `${selectedPhotos.size} Selected` : 'Gallery'}
-                </Text>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={styles.title}>
+                        {isSelectionMode ? `${selectedPhotos.size} Selected` : 'Gallery'}
+                    </Text>
+                    {/* Toggle Button */}
+                    {!isSelectionMode && (
+                        <TouchableOpacity
+                            onPress={() => setShowGrouped(!showGrouped)}
+                            style={[styles.headerButton, { flexDirection: 'row', alignItems: 'center' }]}
+                        >
+                            <Icon
+                                name={showGrouped ? "layers" : "view-grid"}
+                                size={20}
+                                color="white"
+                                style={{ marginRight: 5 }}
+                            />
+                            <Text style={{ color: 'white', fontSize: 12 }}>
+                                {showGrouped ? "Grouped" : "All"}
+                            </Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
 
                 <View style={styles.headerActions}>
                     {isSelectionMode ? (
@@ -149,9 +199,9 @@ export function GalleryScreen({ navigation }: any) {
             </View>
 
             <FlatList
-                data={photos}
+                data={galleryData}
                 renderItem={renderItem}
-                keyExtractor={item => item}
+                keyExtractor={item => item.id}
                 numColumns={COLUMN_COUNT}
                 contentContainerStyle={styles.list}
             />
@@ -203,5 +253,13 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.5,
         shadowRadius: 1,
         elevation: 2,
+    },
+    groupIndicator: {
+        position: 'absolute',
+        top: 5,
+        right: 5,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        borderRadius: 10,
+        padding: 4,
     }
 });

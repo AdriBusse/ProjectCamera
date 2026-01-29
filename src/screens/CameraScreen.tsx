@@ -5,14 +5,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 import RNFS from 'react-native-fs';
 import { CaptureButton } from '../components/CaptureButton';
-import ImageEditor from '@react-native-community/image-editor';
 import { APP_FOLDER_PATH } from '../utils/constants';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { CropOverlay } from '../components/CropOverlay';
+import { GalleryPreviewButton } from '../components/GalleryPreviewButton';
+import { useGallery } from '../hooks/useGallery';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { ThemeProvider, useTheme } from '../context/ThemeContext';
 import { SettingsDropdown } from '../components/SettingsDropdown';
 import { FlashMenu } from '../components/FlashMenu';
+import { Skia, ImageFormat } from '@shopify/react-native-skia';
 import { CameraTopBar } from '../components/CameraTopBar';
 import LinearGradient from 'react-native-linear-gradient';
 import Orientation from 'react-native-orientation-locker';
@@ -51,6 +53,7 @@ export const CameraScreen = ({ navigation }: any) => {
     const insets = useSafeAreaInsets();
     const camera = useRef<Camera>(null);
     const { theme } = useTheme();
+    const { photos } = useGallery();
 
     const [cropRegion, setCropRegion] = useState<{ x: number, y: number, width: number, height: number } | null>(null);
     const [isCapturing, setIsCapturing] = useState(false);
@@ -232,8 +235,43 @@ export const CameraScreen = ({ navigation }: any) => {
                         }
 
                         try {
-                            const croppedResult = await ImageEditor.cropImage(inputPath, cropData);
-                            finalPath = croppedResult.uri;
+                            // Skia Cropping Replacement
+                            const base64Input = await RNFS.readFile(inputPath, 'base64');
+                            const fileData = Skia.Data.fromBase64(base64Input);
+                            const skImage = Skia.Image.MakeImageFromEncoded(fileData);
+
+                            if (skImage) {
+                                // makeSubset is not available in JS API for SkImage in this version.
+                                // We use Surface to draw the crop.
+                                const cropWInt = Math.round(cropW);
+                                const cropHInt = Math.round(cropH);
+                                const cropXInt = Math.round(cropX);
+                                const cropYInt = Math.round(cropY);
+
+                                const surface = Skia.Surface.Make(cropWInt, cropHInt);
+                                if (surface) {
+                                    const canvas = surface.getCanvas();
+                                    // Draw the original image shifted by -cropX, -cropY
+                                    canvas.drawImage(skImage, -cropXInt, -cropYInt);
+
+                                    const subset = surface.makeImageSnapshot();
+
+                                    if (subset) {
+                                        const base64 = subset.encodeToBase64(ImageFormat.JPEG, 100);
+
+                                        const tempFilename = `temp_crop_${Date.now()}.jpg`;
+                                        const tempPath = `${RNFS.CachesDirectoryPath}/${tempFilename}`;
+
+                                        await RNFS.writeFile(tempPath, base64, 'base64');
+                                        finalPath = `file://${tempPath}`;
+                                    }
+                                } else {
+                                    console.error('Skia Surface.Make failed');
+                                }
+                            } else {
+                                console.error('Skia failed to load image from', inputPath);
+                            }
+
                         } catch (cropError) {
                             console.error('Crop failed:', cropError);
                         }
@@ -242,7 +280,24 @@ export const CameraScreen = ({ navigation }: any) => {
                     const filename = `photo_${Date.now()}.jpg`;
                     const path = `file://${APP_FOLDER_PATH}/${filename}`;
 
-                    await RNFS.moveFile(finalPath, path);
+                    // If finalPath is our temp file, we move it. 
+                    // If it was original (no crop), we move/copy it. 
+                    // Note: If input was original photo path, moveFile might fail if source doesn't exist?
+                    // Actually photo.path from vision-camera is usually a temp file.
+                    // If we cropped, finalPath is our NEW temp file.
+                    // So moveFile is correct.
+
+                    // Caveat: If we cropped, we created a new file. The original `photo.path` is still there. 
+                    // Vision camera documentation says we should manage that file.
+                    // If we didn't crop, finalPath = photo.path.
+
+                    if (finalPath.startsWith('file://')) {
+                        finalPath = finalPath.replace('file://', '');
+                    }
+                    // Clean destination path just in case
+                    const cleanDest = path.replace('file://', '');
+
+                    await RNFS.moveFile(finalPath, cleanDest);
 
                     if (Platform.OS === 'android' && !(await hasAndroidPermission())) {
                         console.warn('Permission denied for gallery save');
@@ -388,18 +443,12 @@ export const CameraScreen = ({ navigation }: any) => {
             <SettingsDropdown visible={showSettings} onClose={() => setShowSettings(false)} />
 
             <View style={[styles.controls, { paddingBottom: insets.bottom + 20 }]}>
-                <TouchableOpacity
-                    style={styles.galleryButton}
-                    onPress={() => navigation.navigate('Gallery')}
-                    disabled={isCapturing}
-                >
-                    <Animated.View style={[animatedIconStyle, { opacity: isCapturing ? 0.5 : 1 }]}>
-                        <LinearGradient
-                            colors={theme.secondaryGradient}
-                            style={[styles.galleryIcon, { borderColor: theme.borderColor }]}
-                        />
-                    </Animated.View>
-                </TouchableOpacity>
+                <View style={styles.galleryButton}>
+                    <GalleryPreviewButton
+                        photos={photos}
+                        onPress={() => navigation.navigate('Gallery')}
+                    />
+                </View>
 
                 <CaptureButton onPress={onCapture} isLoading={isCapturing} />
 
