@@ -8,6 +8,7 @@ export interface Theme {
     borderColor: string;
     glowColor: string;
     textColor: string;
+    primaryColor: string;
 }
 
 export const THEMES: { [key: string]: Theme } = {
@@ -18,6 +19,7 @@ export const THEMES: { [key: string]: Theme } = {
         borderColor: '#00FFFF',
         glowColor: 'rgba(0, 255, 255, 0.8)',
         textColor: '#00FFFF',
+        primaryColor: '#00FFFF',
     },
     GREEN_TOXIC: {
         name: 'Toxic Green',
@@ -26,6 +28,7 @@ export const THEMES: { [key: string]: Theme } = {
         borderColor: '#00FF66',
         glowColor: 'rgba(0, 255, 102, 0.8)',
         textColor: '#00FF66',
+        primaryColor: '#00FF66',
     },
     RED_ALERT: {
         name: 'Red Alert',
@@ -34,6 +37,7 @@ export const THEMES: { [key: string]: Theme } = {
         borderColor: '#FF0055',
         glowColor: 'rgba(255, 0, 0, 0.8)',
         textColor: '#FF0055',
+        primaryColor: '#FF0055',
     },
     ORANGE_FLAME: {
         name: 'Orange Flame',
@@ -42,6 +46,7 @@ export const THEMES: { [key: string]: Theme } = {
         borderColor: '#FF6600',
         glowColor: 'rgba(255, 102, 0, 0.8)',
         textColor: '#FFCC00',
+        primaryColor: '#FF6600',
     }
 };
 

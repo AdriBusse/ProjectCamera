@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { CameraScreen } from './src/screens/CameraScreen';
 import { GalleryScreen } from './src/screens/GalleryScreen';
 import { PhotoScreen } from './src/screens/PhotoScreen';
+import { ImageEditScreen } from './src/screens/ImageEditScreen';
 
 // const CameraScreen = () => <></>;
 // const GalleryScreen = () => <></>;
@@ -14,21 +15,24 @@ const Stack = createNativeStackNavigator();
 
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
-function App() {
-    console.log('App.tsx: CameraScreen:', CameraScreen);
-    console.log('App.tsx: GalleryScreen:', GalleryScreen);
+import { ThemeProvider } from './src/context/ThemeContext';
+
+function App(): React.JSX.Element {
     return (
         <GestureHandlerRootView style={{ flex: 1 }}>
-            <SafeAreaProvider>
-                <StatusBar barStyle="light-content" backgroundColor="black" />
-                <NavigationContainer>
-                    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade' }}>
-                        <Stack.Screen name="Camera" component={CameraScreen} />
-                        <Stack.Screen name="Gallery" component={GalleryScreen} />
-                        <Stack.Screen name="Photo" component={PhotoScreen} />
-                    </Stack.Navigator>
-                </NavigationContainer>
-            </SafeAreaProvider>
+            <ThemeProvider>
+                <SafeAreaProvider>
+                    <StatusBar barStyle="light-content" backgroundColor="black" />
+                    <NavigationContainer>
+                        <Stack.Navigator screenOptions={{ headerShown: false }}>
+                            <Stack.Screen name="Camera" component={CameraScreen} />
+                            <Stack.Screen name="Gallery" component={GalleryScreen} />
+                            <Stack.Screen name="Photo" component={PhotoScreen} />
+                            <Stack.Screen name="ImageEdit" component={ImageEditScreen} />
+                        </Stack.Navigator>
+                    </NavigationContainer>
+                </SafeAreaProvider>
+            </ThemeProvider>
         </GestureHandlerRootView>
     );
 }
